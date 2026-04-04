@@ -3,6 +3,9 @@ import time
 import subprocess
 from PyQt6.QtCore import QThread, pyqtSignal
 
+# CREATE_BREAKAWAY_FROM_JOB + CREATE_NEW_PROCESS_GROUP
+CREATION_FLAGS = 0x01000000 | 0x00000200
+
 
 class BacktesterThread(QThread):
     log_signal = pyqtSignal(str)
@@ -35,8 +38,9 @@ class BacktesterThread(QThread):
                 return
 
             name = os.path.splitext(ex5)[0]
-            ini_file = os.path.join(self.ea_source_dir, f"{name}.ini")
-            report_file = os.path.join(self.report_dir, f"{name}.htm")
+            # Fix 2: Force absolute path — MT5 /config: requires it
+            ini_file = os.path.abspath(os.path.join(self.ea_source_dir, f"{name}.ini"))
+            report_file = os.path.abspath(os.path.join(self.report_dir, f"{name}.htm"))
 
             self.log_signal.emit(f"{'─' * 50}")
             self.log_signal.emit(f"(info) [{i}/{total}] Testing {name}...")
@@ -53,12 +57,13 @@ class BacktesterThread(QThread):
                 )
                 continue
 
-            # Launch MT5 Terminal
+            # Launch MT5 Terminal — direct call with absolute path
             self.log_signal.emit(f"(info) Launching MT5 Terminal...")
+            self.log_signal.emit(f"(info) Config: {ini_file}")
             try:
                 subprocess.Popen(
-                    [f'"{self.terminal_path}"', f'/config:"{ini_file}"'],
-                    shell=True,
+                    [self.terminal_path, f"/config:{ini_file}"],
+                    creationflags=CREATION_FLAGS,
                 )
             except Exception as e:
                 self.log_signal.emit(f"(error) Failed to launch terminal: {e}")

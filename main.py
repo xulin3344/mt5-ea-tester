@@ -220,22 +220,38 @@ class SettingsPage(StepPage):
             line_edit.setText(d)
 
     def _test_paths(self):
-        mt5 = self.mt5_path.text()
+        mt5 = self.mt5_path.text().strip()
         editor = os.path.join(mt5, "metaeditor64.exe")
         terminal = os.path.join(mt5, "terminal64.exe")
+        ea = self.ea_dir.text().strip()
         msgs = []
+        msgs.append(f"MT5 Path: {mt5}")
+        msgs.append(f"Checking: {editor}")
+        msgs.append("")
         if os.path.exists(editor):
-            msgs.append("metaeditor64.exe found.")
+            msgs.append("(OK) metaeditor64.exe found.")
         else:
             msgs.append("ERROR: metaeditor64.exe not found.")
+            # List actual files for debugging
+            try:
+                if os.path.isdir(mt5):
+                    files = [f for f in os.listdir(mt5) if f.lower().startswith("meta") or f.lower().startswith("terminal")]
+                    msgs.append(f"Files in MT5 dir: {files}")
+                else:
+                    msgs.append(f"MT5 dir does not exist!")
+            except Exception as e:
+                msgs.append(f"Error listing dir: {e}")
+        msgs.append(f"Checking: {terminal}")
         if os.path.exists(terminal):
-            msgs.append("terminal64.exe found.")
+            msgs.append("(OK) terminal64.exe found.")
         else:
             msgs.append("ERROR: terminal64.exe not found.")
-        if os.path.isdir(self.ea_dir.text()):
-            msgs.append("EA directory exists.")
+        msgs.append("")
+        if os.path.isdir(ea):
+            msgs.append(f"(OK) EA directory exists.")
         else:
-            msgs.append("WARNING: EA directory does not exist.")
+            msgs.append(f"WARNING: EA directory does not exist.")
+            msgs.append(f"Checked: {ea}")
         QMessageBox.information(self, "Path Check", "\n".join(msgs))
 
     def _open_changelog(self):
@@ -382,8 +398,10 @@ class ConfigPage(StepPage):
             self.status_label.setText("(error) EA directory not found.")
             return
 
+        report_dir = self.settings.value("report_dir", "./reports")
         names = generate_configs(
             ea_dir,
+            report_dir,
             symbol=self.settings.value("symbol", "XAUUSDm"),
             period=self.settings.value("period", "H1"),
             from_date=self.settings.value("from_date", "2025.01.01"),
