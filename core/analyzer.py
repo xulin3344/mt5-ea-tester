@@ -49,24 +49,29 @@ def parse_html_report(file_path: str) -> EAResult:
         'total_profit': [
             r'Total Net Profit.*?<b>(.*?)</b>',
             r'总净利润.*?<b>(.*?)</b>',
-            r'净利润.*?<b>(.*?)</b>',
+            r'总净盈利.*?<b>(.*?)</b>',
         ],
         'max_drawdown': [
             r'Maximal Drawdown.*?<b>.*?(\d+\.\d+).*?%?</b>',
             r'最大回撤.*?<b>.*?(\d+\.\d+).*?%?</b>',
+            r'最大结余亏损.*?<b>\d+\.\d+ \((\d+\.\d+)%\)</b>',
+            r'最大净值亏损.*?<b>\d+\.\d+ \((\d+\.\d+)%\)</b>',
         ],
         'profit_factor': [
             r'Profit Factor.*?<b>(.*?)</b>',
             r'获利因子.*?<b>(.*?)</b>',
+            r'盈利因子.*?<b>(.*?)</b>',
         ],
         'total_trades': [
             r'Total Trades.*?<b>(.*?)</b>',
             r'总交易.*?<b>(.*?)</b>',
             r'成交笔数.*?<b>(.*?)</b>',
+            r'交易总计.*?<b>(.*?)</b>',
         ],
         'win_rate': [
             r'Winning Trades.*?<b>.*?\((\d+\.\d+)%\)</b>',
             r'胜率.*?<b>.*?\((\d+\.\d+)%\)</b>',
+            r'盈利交易 \(% 全部\):.*?<b>\d+ \((\d+\.\d+)%\)</b>',
         ],
     }
 

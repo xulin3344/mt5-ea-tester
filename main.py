@@ -532,6 +532,35 @@ class AnalysisPage(StepPage):
         self.table.setSortingEnabled(True)
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.table.setAlternatingRowColors(True)
+        self.table.setStyleSheet(
+            """
+            QTableWidget {
+                gridline-color: #ccc;
+                font-size: 12px;
+            }
+            QTableWidget::item {
+                padding: 6px;
+                color: #1a1a1a;
+            }
+            QHeaderView::section {
+                background: #2c3e50;
+                color: white;
+                font-weight: bold;
+                font-size: 12px;
+                padding: 6px;
+                border: 1px solid #34495e;
+            }
+            QTableWidget::item:selected {
+                background: #3498db;
+                color: white;
+                font-weight: bold;
+            }
+            QTableWidget::item:nth-child(even) {
+                background: #f7f7f7;
+            }
+            """
+        )
         layout.addWidget(self.table)
 
         self.status_label = QLabel("")
@@ -571,16 +600,18 @@ class AnalysisPage(StepPage):
             for col in range(6):
                 self.table.item(0, col).setBackground(QColor("#e8f5e9"))
 
-        # Also regenerate HTML report
-        output = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ea_ranking_report.html")
+        # Also regenerate HTML report in report_dir
+        report_dir = self.settings.value("report_dir", "./reports")
+        output = os.path.join(report_dir, "ea_ranking_report.html")
         if results:
             generate_html_report(results, output)
-            self.status_label.setText(f"(success) Analyzed {len(results)} report(s). Report saved.")
+            self.status_label.setText(f"(success) Analyzed {len(results)} report(s). Report saved to {report_dir}/")
         else:
             self.status_label.setText("(warning) Parsed reports but found no data.")
 
     def _open_report(self):
-        report_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ea_ranking_report.html")
+        report_dir = self.settings.value("report_dir", "./reports")
+        report_path = os.path.join(report_dir, "ea_ranking_report.html")
         if os.path.exists(report_path):
             webbrowser.open(report_path)
         else:
