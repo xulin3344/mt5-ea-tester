@@ -1,0 +1,12 @@
+# Build outputs
+dist/
+build/
+__pycache__/
+*.pyc
+
+# PyInstaller generated spec
+mt5_ea_tester.spec
+
+# IDE
+.vscode/
+.idea/
