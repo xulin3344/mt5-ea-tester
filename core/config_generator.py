@@ -3,6 +3,7 @@ import os
 
 def generate_configs(
     ea_source_dir,
+    report_dir,
     symbol="XAUUSDm",
     period="H1",
     from_date="2025.01.01",
@@ -19,6 +20,7 @@ def generate_configs(
     if not ex5_files:
         return []
 
+    os.makedirs(report_dir, exist_ok=True)
     generated = []
     for f in ex5_files:
         name = os.path.splitext(f)[0]
