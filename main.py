@@ -528,6 +528,283 @@ class BacktestPage(StepPage):
         self.log.append_log(f"{'(success)' if success else '(warning)'} {msg}")
 
 
+class AutoPipelineWidget(StepPage):
+    """One-click pipeline: Compile → Config → Backtest → Analysis."""
+
+    pipeline_done = pyqtSignal(bool, str)  # success, message
+
+    def __init__(self, main_window, parent=None):
+        super().__init__(parent)
+        self.mw = main_window
+        self.settings = main_window.settings
+        self._running = False
+        self._compile_done = False
+        self._config_done = False
+        self._backtest_done = False
+        self._analysis_done = False
+        self.init_ui()
+
+    def init_ui(self):
+        layout = QVBoxLayout(self)
+
+        info = QLabel("一键执行全流程：编译 → 配置 → 回测 → 分析\n\n每步完成后自动进入下一步，失败即停止。")
+        info.setStyleSheet("font-size: 14px; padding: 12px;")
+        info.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(info)
+
+        self.progress = QProgressBar()
+        self.progress.setVisible(False)
+        layout.addWidget(self.progress)
+
+        # Step indicator
+        self.step_label = QLabel("就绪")
+        self.step_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.step_label.setStyleSheet("font-size: 13px; color: #555; padding: 8px;")
+        layout.addWidget(self.step_label)
+
+        # Log
+        layout.addWidget(QLabel("运行日志："))
+        self.log = LogWidget()
+        layout.addWidget(self.log)
+
+        self.layout().addStretch()
+
+        # Buttons row
+        btn_row = QHBoxLayout()
+        self.run_btn = QPushButton("Start Pipeline")
+        self.run_btn.clicked.connect(self._start_pipeline)
+        self.stop_btn = QPushButton("Stop")
+        self.stop_btn.setEnabled(False)
+        self.stop_btn.clicked.connect(self._stop_pipeline)
+        btn_row.addWidget(self.run_btn)
+        btn_row.addWidget(self.stop_btn)
+        layout.addLayout(btn_row)
+
+    def _start_pipeline(self):
+        self.save_settings()
+        self._running = True
+        self._compile_done = False
+        self._config_done = False
+        self._backtest_done = False
+        self._analysis_done = False
+
+        self.run_btn.setEnabled(False)
+        self.stop_btn.setEnabled(True)
+        self.progress.setVisible(True)
+        self.progress.setRange(0, 4)
+        self.progress.setValue(0)
+
+        self.log.append_log("(info) ===== Pipeline started =====")
+        self._run_compile()
+
+    def _stop_pipeline(self):
+        self._running = False
+        if self.mw.compile_page.worker and self.mw.compile_page.worker.isRunning():
+            self.mw.compile_page.worker.stop()
+            self.mw.compile_page.worker.terminate()
+        if self.mw.backtest_page.worker and self.mw.backtest_page.worker.isRunning():
+            self.mw.backtest_page.worker.terminate()
+        self.run_btn.setEnabled(True)
+        self.stop_btn.setEnabled(False)
+        self.progress.setVisible(False)
+        self.log.append_log("(warning) Pipeline stopped by user.")
+        self.step_label.setText("已停止")
+
+    def save_settings(self):
+        self.mw.settings_page.save_settings()
+        self.mw.settings.setValue("from_date", self.mw.settings_page.from_date.date().toString("yyyy.MM.dd"))
+        self.mw.settings.setValue("to_date", self.mw.settings_page.to_date.date().toString("yyyy.MM.dd"))
+
+    # ---- Step 1: Compile ----
+    def _run_compile(self):
+        self.step_label.setText("Step 1/4: 编译 EA")
+        self.log.append_log("(info) [1/4] Starting compilation...")
+        self.progress.setValue(0)
+
+        mt5_path = self.settings.value("mt5_path", "")
+        ea_dir = self.settings.value("ea_dir", "./ea")
+        metaeditor = os.path.join(mt5_path, "metaeditor64.exe")
+        if not os.path.exists(metaeditor):
+            self.log.append_log(f"(error) metaeditor64.exe not found")
+            self._pipeline_fail("metaeditor64.exe not found. Check Settings.")
+            return
+        if not os.path.isdir(ea_dir):
+            self.log.append_log(f"(error) EA directory not found")
+            self._pipeline_fail("EA directory not found. Check Settings.")
+            return
+        mq5_count = len([f for f in os.listdir(ea_dir) if f.endswith(".mq5")])
+        if mq5_count == 0:
+            self.log.append_log(f"(error) No .mq5 files found")
+            self._pipeline_fail("No .mq5 files found.")
+            return
+
+        self.mw.stack.setCurrentIndex(1)  # switch to compile page
+        self.mw.compile_page.progress.setVisible(True)
+        self.mw.compile_page.run_btn.setEnabled(False)
+        worker = CompilerThread(metaeditor, ea_dir)
+        worker.log_signal.connect(self.log.append_log)
+        worker.finished_signal.connect(self._on_compile_done)
+        self.mw.compile_page.worker = worker
+        worker.start()
+
+    def _on_compile_done(self, success, msg):
+        if not self._running:
+            return
+        self.mw.compile_page.progress.setVisible(False)
+        self.mw.compile_page.progress.setValue(0)
+        self.mw.compile_page.run_btn.setEnabled(True)
+        self.log.append_log(f"{'(success)' if success else '(error)'} Compile: {msg}")
+        if not success:
+            self._pipeline_fail(f"Compile failed: {msg}")
+            return
+        self._compile_done = True
+        self.progress.setValue(1)
+        self._run_config()
+
+    # ---- Step 2: Config ----
+    def _run_config(self):
+        self.step_label.setText("Step 2/4: 生成配置")
+        self.log.append_log("(info) [2/4] Generating configs...")
+        self.mw.stack.setCurrentIndex(2)
+
+        ea_dir = self.settings.value("ea_dir", "./ea")
+        report_dir = self.settings.value("report_dir", "./reports")
+        names = generate_configs(
+            ea_dir,
+            report_dir,
+            symbol=self.settings.value("symbol", "XAUUSDm"),
+            period=self.settings.value("period", "H1"),
+            from_date=self.settings.value("from_date", "2025.01.01"),
+            to_date=self.settings.value("to_date", "2026.03.01"),
+            deposit=int(self.settings.value("deposit", 10000)),
+            leverage=int(self.settings.value("leverage", 500)),
+        )
+        if not names:
+            self.log.append_log("(error) Config: no .ex5 files found")
+            self._pipeline_fail("Config failed: no .ex5 files. Compile first.")
+            return
+        self.log.append_log(f"(success) Config: generated {len(names)} config(s)")
+        self._config_done = True
+        self.progress.setValue(2)
+        self.progress.setRange(0, 0)  # indeterminate during backtest
+        self._run_backtest()
+
+    # ---- Step 3: Backtest ----
+    def _run_backtest(self):
+        self.step_label.setText("Step 3/4: 批量回测")
+        self.log.append_log("(info) [3/4] Starting backtest...")
+        self.mw.stack.setCurrentIndex(3)
+
+        mt5_path = self.settings.value("mt5_path", "")
+        ea_dir = self.settings.value("ea_dir", "./ea")
+        report_dir = self.settings.value("report_dir", "./reports")
+        terminal = os.path.join(mt5_path, "terminal64.exe")
+        if not os.path.exists(terminal):
+            self.log.append_log(f"(error) terminal64.exe not found")
+            self._pipeline_fail("terminal64.exe not found.")
+            return
+
+        ex5_count = len([f for f in os.listdir(ea_dir) if f.endswith(".ex5")])
+        if ex5_count == 0:
+            self.log.append_log("(error) Backtest: no .ex5 files")
+            self._pipeline_fail("Backtest failed: no .ex5 files.")
+            return
+
+        self.mw.backtest_page.run_btn.setEnabled(False)
+        self.mw.backtest_page.progress.setVisible(True)
+        self.mw.backtest_page.progress.setRange(0, 0)
+        worker = BacktesterThread(terminal, ea_dir, report_dir)
+        worker.log_signal.connect(self.log.append_log)
+        worker.progress_signal.connect(self._on_backtest_progress)
+        worker.finished_signal.connect(self._on_backtest_done)
+        self.mw.backtest_page.worker = worker
+        worker.start()
+
+    def _on_backtest_progress(self, current, total):
+        self.mw.backtest_page.progress.setMaximum(total)
+        self.mw.backtest_page.progress.setValue(current)
+        self.progress.setMaximum(total)
+        self.progress.setValue(current)
+
+    def _on_backtest_done(self, success, msg):
+        if not self._running:
+            return
+        self.mw.backtest_page.run_btn.setEnabled(True)
+        self.mw.backtest_page.progress.setVisible(False)
+        self.mw.backtest_page.progress.setRange(0, 100)
+        self.mw.backtest_page.progress.setValue(0)
+        self.log.append_log(f"{'(success)' if success else '(error)'} Backtest: {msg}")
+        if not success:
+            self._pipeline_fail(f"Backtest failed: {msg}")
+            return
+        self._backtest_done = True
+        self.progress.setRange(0, 4)
+        self.progress.setValue(3)
+        # Switch backtab page to analysis
+        self._run_analysis()
+
+    # ---- Step 4: Analysis ----
+    def _run_analysis(self):
+        self.step_label.setText("Step 4/4: 分析报告")
+        self.log.append_log("(info) [4/4] Analyzing results...")
+        self.mw.stack.setCurrentIndex(4)
+
+        report_dir = self.settings.value("report_dir", "./reports")
+        import glob as glob_mod
+        htm_files = glob_mod.glob(os.path.join(report_dir, "*.htm"))
+        if not htm_files:
+            self.log.append_log("(warning) Analysis: no .htm reports found")
+            self._pipeline_fail("No .htm reports found for analysis.")
+            return
+        results = [parse_html_report(f) for f in htm_files]
+        results.sort(key=lambda x: x.total_profit, reverse=True)
+        self.mw.analysis_page.table.setRowCount(len(results))
+        for i, r in enumerate(results):
+            self.mw.analysis_page.table.setItem(i, 0, QTableWidgetItem(r.name))
+            self.mw.analysis_page.table.setItem(i, 1, QTableWidgetItem(f"{r.total_profit:,.2f}"))
+            self.mw.analysis_page.table.setItem(i, 2, QTableWidgetItem(f"{r.max_drawdown:.2f}"))
+            self.mw.analysis_page.table.setItem(i, 3, QTableWidgetItem(f"{r.profit_factor:.2f}"))
+            self.mw.analysis_page.table.setItem(i, 4, QTableWidgetItem(str(r.total_trades)))
+            self.mw.analysis_page.table.setItem(i, 5, QTableWidgetItem(f"{r.win_rate:.2f}"))
+
+            profit_item = self.mw.analysis_page.table.item(i, 1)
+            if r.total_profit >= 0:
+                profit_item.setForeground(QColor("#27ae60"))
+            else:
+                profit_item.setForeground(QColor("#e74c3c"))
+
+        if results and results[0].total_profit > 0:
+            for col in range(6):
+                item = self.mw.analysis_page.table.item(0, col)
+                if item:
+                    item.setBackground(QColor("#e8f5e9"))
+
+        output = os.path.join(report_dir, "ea_ranking_report.html")
+        if results:
+            generate_html_report(results, output)
+        self.log.append_log(f"(success) Analysis: {len(results)} report(s)")
+        self._analysis_done = True
+        self.progress.setValue(4)
+        self._pipeline_success(f"Pipeline complete: {len(results)} strategies analyzed.")
+
+    def _pipeline_fail(self, msg):
+        self._running = False
+        self.run_btn.setEnabled(True)
+        self.stop_btn.setEnabled(False)
+        self.progress.setVisible(False)
+        self.step_label.setText(f"失败: {msg}")
+        self.log.append_log(f"(error) Pipeline failed: {msg}")
+
+    def _pipeline_success(self, msg):
+        self._running = False
+        self.run_btn.setEnabled(True)
+        self.stop_btn.setEnabled(False)
+        self.progress.setVisible(False)
+        self.step_label.setText(f"完成: {msg}")
+        self.log.append_log(f"(success) {msg}")
+        QMessageBox.information(self, "Pipeline Complete", msg)
+
+
 class AnalysisPage(StepPage):
     def __init__(self, settings_obj: QSettings, parent=None):
         super().__init__(parent)
@@ -754,6 +1031,7 @@ class MainWindow(QMainWindow):
         "Backtest",
         "Analysis",
         "Cleanup",
+        "Auto Mode",
     ]
 
     def __init__(self):
@@ -782,7 +1060,7 @@ class MainWindow(QMainWindow):
             QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding
         )
         self.sidebar.setSpacing(4)
-        icon_list = ["⚙", "🔨", "📋", "🚀", "📊", "🧹"]
+        icon_list = ["⚙", "🔨", "📋", "🚀", "📊", "🧹", "▶"]
         for icon, name in zip(icon_list, self.STEP_NAMES):
             item = QListWidgetItem(f"{icon}  {name}")
             item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
@@ -800,6 +1078,7 @@ class MainWindow(QMainWindow):
         self.backtest_page = BacktestPage(self.settings)
         self.analysis_page = AnalysisPage(self.settings)
         self.cleanup_page = CleanupPage(self.settings)
+        self.auto_page = AutoPipelineWidget(self)
 
         self.stack.addWidget(self.settings_page)
         self.stack.addWidget(self.compile_page)
@@ -807,6 +1086,7 @@ class MainWindow(QMainWindow):
         self.stack.addWidget(self.backtest_page)
         self.stack.addWidget(self.analysis_page)
         self.stack.addWidget(self.cleanup_page)
+        self.stack.addWidget(self.auto_page)
         splitter.addWidget(self.stack)
 
         # Initial split ratio ~160:740 for 900px width
