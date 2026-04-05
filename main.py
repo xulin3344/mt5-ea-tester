@@ -10,9 +10,11 @@ from PyQt6.QtWidgets import (
     QPushButton, QFileDialog, QPlainTextEdit, QGroupBox, QFormLayout,
     QSpinBox, QComboBox, QDateEdit, QProgressBar, QCheckBox,
     QTableWidgetItem, QHeaderView, QTableWidget, QAbstractItemView,
-    QMessageBox, QStatusBar, QSplitter, QScrollArea,
+    QMessageBox, QStatusBar, QSplitter, QScrollArea, QSizePolicy,
 )
-from PyQt6.QtCore import Qt, QDate, QSettings, pyqtSignal, QThread
+from PyQt6.QtCore import QSize
+from PyQt6.QtCore import Qt, QDate, QSettings, pyqtSignal, QThread, QSize
+from PyQt6.QtGui import QFont, QColor, QIcon
 from PyQt6.QtGui import QFont, QColor, QIcon
 
 # Add core module path
@@ -74,7 +76,34 @@ def _make_labeled(label_text: str, widget):
 
 class StepPage(QWidget):
     """Base class for step pages with log area and run button."""
-    pass
+
+    def sizeHint(self):
+        return QSize(300, 200)
+
+    def minimumSizeHint(self):
+        return QSize(0, 0)
+
+    def minimumSize(self):
+        return QSize(0, 0)
+
+
+class DynamicStackedWidget(QStackedWidget):
+    """Only considers the current widget's size hint, and doesn't push min size up."""
+
+    def minimumSizeHint(self):
+        w = self.currentWidget()
+        if w:
+            return w.minimumSizeHint()
+        return QSize(0, 0)
+
+    def minimumSize(self):
+        return QSize(0, 0)
+
+    def sizeHint(self):
+        w = self.currentWidget()
+        if w:
+            return w.sizeHint()
+        return QSize(300, 200)
 
 
 # ---- Step Pages ----
@@ -507,6 +536,13 @@ class AnalysisPage(StepPage):
 
     def init_ui(self):
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(9, 9, 9, 9)
+        layout.setSpacing(6)
+
+        self.setMinimumSize(0, 0)
+        self.setSizePolicy(
+            QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Minimum
+        )
 
         top_row = QHBoxLayout()
         self.analyze_btn = QPushButton("Analyze Results")
@@ -523,12 +559,20 @@ class AnalysisPage(StepPage):
 
         layout.addLayout(top_row)
 
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Expanding)
+
         self.table = QTableWidget()
         self.table.setColumnCount(6)
         self.table.setHorizontalHeaderLabels(
             ["Strategy", "Net Profit ($)", "Max DD (%)", "Profit Factor", "Trades", "Win Rate (%)"]
         )
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.table.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Expanding)
+        self.table.setMinimumSize(0, 0)
         self.table.setSortingEnabled(True)
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
@@ -561,7 +605,9 @@ class AnalysisPage(StepPage):
             }
             """
         )
-        layout.addWidget(self.table)
+
+        scroll.setWidget(self.table)
+        layout.addWidget(scroll)
 
         self.status_label = QLabel("")
         layout.addWidget(self.status_label)
@@ -724,10 +770,17 @@ class MainWindow(QMainWindow):
         central = QWidget()
         self.setCentralWidget(central)
         main_layout = QHBoxLayout(central)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+
+        # Splitter for resizable sidebar/content
+        splitter = QSplitter(Qt.Orientation.Horizontal)
 
         # Left sidebar
         self.sidebar = QListWidget()
-        self.sidebar.setFixedWidth(160)
+        self.sidebar.setMinimumWidth(80)
+        self.sidebar.setSizePolicy(
+            QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding
+        )
         self.sidebar.setSpacing(4)
         icon_list = ["⚙", "🔨", "📋", "🚀", "📊", "🧹"]
         for icon, name in zip(icon_list, self.STEP_NAMES):
@@ -737,10 +790,10 @@ class MainWindow(QMainWindow):
             item.setFont(font)
             self.sidebar.addItem(item)
         self.sidebar.currentRowChanged.connect(self._on_step_changed)
-        main_layout.addWidget(self.sidebar, 0)
+        splitter.addWidget(self.sidebar)
 
         # Right stacked widget
-        self.stack = QStackedWidget()
+        self.stack = DynamicStackedWidget()
         self.settings_page = SettingsPage(self.settings)
         self.compile_page = CompilePage(self.settings)
         self.config_page = ConfigPage(self.settings)
@@ -754,7 +807,11 @@ class MainWindow(QMainWindow):
         self.stack.addWidget(self.backtest_page)
         self.stack.addWidget(self.analysis_page)
         self.stack.addWidget(self.cleanup_page)
-        main_layout.addWidget(self.stack, 1)
+        splitter.addWidget(self.stack)
+
+        # Initial split ratio ~160:740 for 900px width
+        splitter.setSizes([160, 740])
+        main_layout.addWidget(splitter)
 
         # Set initial selection after stack is created
         self.stack.setCurrentIndex(0)
