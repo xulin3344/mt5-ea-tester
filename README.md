@@ -47,6 +47,7 @@ The entire pipeline is automated — from raw MQ5 source to a ranked HTML report
 | **Config Persistence** | Settings saved between sessions (paths, params, etc.) |
 | **Version Management** | Built-in versioning, changelog, exe metadata |
 | **Standalone EXE** | Single-file executable — no Python install required |
+| **One-Click Pipeline** | Compile → Config → Backtest → Analysis in one click (▶ Auto Mode) |
 | **Cleanup** | One-click remove all temp files between runs |
 
 ---
@@ -83,7 +84,9 @@ pyinstaller --clean build.spec
 
 ## How It Works
 
-### The 6-Step Pipeline
+### The Pipeline
+
+You can either go through each step manually, or use **▶ Auto Mode** (one-click full pipeline):
 
 ```
 ┌─────────┐    ┌─────────┐    ┌─────────┐    ┌─────────┐    ┌─────────┐
@@ -96,6 +99,17 @@ pyinstaller --clean build.spec
                                                            │   🧹    │
                                                            └─────────┘
 ```
+
+### ▶ Auto Mode (One-Click Pipeline)
+
+Select **▶ Auto Mode** from the sidebar to run the entire pipeline with a single click:
+
+1. Compiles all `.mq5` files
+2. Generates backtest configs
+3. Runs all backtests sequentially
+4. Parses and ranks results in HTML report
+
+The progress bar and live log show each step's status. If any step fails, the pipeline stops and highlights the error.
 
 ### Step Details
 
